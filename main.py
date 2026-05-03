@@ -5,19 +5,15 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, AIMessage, trim_messages
-from langchain_core.messages.utils import count_tokens_approximately
-from langgraph.checkpoint.memory import InMemorySaver
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langgraph.checkpoint.redis import RedisSaver
 from langgraph.graph import StateGraph, MessagesState
 from langgraph.prebuilt import ToolNode
-from langgraph.store.memory import InMemoryStore
 
+from rag.rag_chain import rag_search
 from sql.booking.bookingAPi import router as booking_router
 from sql.booking.venueApi import router as venue_router
 from sql.entity.studentForm import StudentForm
-
-from rag.rag_chain import rag_search
 from sql.tools.tool1 import *
 
 # 获取当前模块的日志记录器（名字就是 main）
@@ -27,6 +23,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 load_dotenv()
+print(f"DEBUG: 尝试连接 Redis 地址: {os.getenv('REDIS_HOST')}:{os.getenv('REDIS_PORT')}")
 app = FastAPI()
 app.include_router(venue_router)
 app.include_router(booking_router)
@@ -35,8 +32,58 @@ model = init_chat_model(
     api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url=os.getenv("DASHSCOPE_BASE_URL"),
     model_provider="openai",
-    model="qwen3.5-35b-a3b",    
+    model="qwen3.5-35b-a3b",
 )
+extractor_model = init_chat_model(
+    api_key=os.getenv("DASHSCOPE_API_KEY"),
+    base_url=os.getenv("DASHSCOPE_BASE_URL"),
+    model_provider="openai",
+    model="qwen-turbo",
+)
+
+def get_message_text(msg) -> str:
+    """安全地提取消息文本，处理 content 是 list 的情况"""
+    if isinstance(msg.content, str):
+        return msg.content
+    if isinstance(msg.content, list):
+        # 混合内容: 提取所有文本片段
+        return "".join(
+            item.get("text", "") if isinstance(item, dict) else str(item)
+            for item in msg.content
+        )
+    return str(msg.content)
+
+def format_messages(messages: list):
+    parts = []
+    for msg in messages:
+        if isinstance(msg, HumanMessage):
+            role = "用户"
+        elif isinstance(msg, AIMessage):
+            role = "AI"
+        elif isinstance(msg, ToolMessage):
+            role = "工具结果"
+        else:
+            role = "未知"
+        text = get_message_text(msg)
+        parts.append(f"[{role}]: {text}")
+    return "\n".join(parts)
+
+def extract_relevant_memory(full_history: list, user_question: str) -> str:
+    """从完整历史中提取与当前提问相关的记忆"""
+    if not user_question:
+        return "/n".join(full_history)
+
+    prompt = f"""以下是完整对话历史,用户当前的问题是: "{user_question}"
+        请提取与当前问题相关的记忆,只保留有用的上下文,不相关的直接丢弃。
+        输出格式为简洁的摘要。
+        ---
+        对话历史:
+        {format_messages(full_history)}
+    """
+    result = extractor_model.invoke([HumanMessage(prompt)])
+    return result.content
+
+
 tools = [
     rag_search, query_venues, check_availability,
     create_booking, cancel_booking
@@ -48,49 +95,55 @@ builder = StateGraph(MessagesState)
 
 def agent_node(state):
     """调模型,返回响应"""
-    trimmed = trim_messages(
-        state['messages'],
-        strategy="last",
-        token_counter=count_tokens_approximately,
-        max_token=4000,
-        start_on="human",
-        end_on=("human","tool")
-    )
-    response = model_with_tools.invoke(trimmed)
+    full_history = state['messages']
+    last_msg = full_history[-1]
+    user_question = last_msg.content if isinstance(last_msg, HumanMessage) else ""
+
+    relevant_memory = extract_relevant_memory(full_history, user_question)
+
+    context_messages = [
+        SystemMessage(f"以下是从历史中提取的相关记忆:\n{relevant_memory}"),
+        last_msg,  # 用户当前提问
+    ]
+    response = model_with_tools.invoke(context_messages)
     return {"messages": [response]}
+
 
 builder.add_node("agent", agent_node)
 builder.add_node("tools", ToolNode(tools))
-#设置入口
+# 设置入口
 builder.set_entry_point("agent")
-#条件边
+
+
+# 条件边
 def should_use_tool(state) -> str:
     """看最后一条消息有没有 tool_calls"""
     last = state['messages'][-1]
-    if isinstance(last,AIMessage) and last.tool_calls:
+    if isinstance(last, AIMessage) and last.tool_calls:
         return "tools"
     return "__end__"
+
+
 builder.add_conditional_edges(
     "agent",
     should_use_tool,
-    {"tools":"tools","__end__":"__end__"},
+    {"tools": "tools", "__end__": "__end__"},
 )
 # 工具执行完后，固定回到 agent（让它基于工具结果继续推理）
 builder.add_edge("tools", "agent")
 
 # Redis 来做记忆持久化
-#"redis://localhost:6379"
+# "redis://localhost:6379"
 REDIS_URL = f"redis://{os.getenv('REDIS_HOST')}:{os.getenv('REDIS_PORT')}"
 redis_checkpointer = RedisSaver(
     redis_url=REDIS_URL,
     ttl={
-        "default_ttl":10080,#这个单位是分钟
-        "refresh_on_read":False, #读取不刷新
+        "default_ttl": 10080,  # 这个单位是分钟
+        "refresh_on_read": False,  # 读取不刷新
     },
 )
-redis_checkpointer.setup()
+redis_checkpointer.setup()  # 必须调! 初始化 _key_registry
 graph = builder.compile(checkpointer=redis_checkpointer)
-
 
 agent = create_agent(
     model=model,
@@ -108,11 +161,11 @@ async def root():
     return {"message": "Hello World"}
 
 @app.post("/chat")
-async def chat(studentForm:StudentForm):
-    config = {"configurable":{"thread_id": str(studentForm.id)}}
+async def chat(studentForm: StudentForm):
+    config = {"configurable": {"thread_id": str(studentForm.id)}}
     try:
         response = graph.invoke(
-            {"messages":[
+            {"messages": [
                 HumanMessage(studentForm.content)
             ]},
             config=config,
@@ -122,7 +175,3 @@ async def chat(studentForm:StudentForm):
         # 记录日志,返回友好提示
         logger.error(f"Chat error: {e}")
         return {"error": "服务暂时不可用,请稍后重试"}
-
-
-
-
