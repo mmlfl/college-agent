@@ -6,10 +6,16 @@ from sqlalchemy.orm import declarative_base
 
 load_dotenv()
 
+#"mysql+pymysql://root:123456@localhost:3306/test_db"
 DATABASE_URL = (
     f"mysql+pymysql://{os.getenv('MYSQL_USER')}:{os.getenv('MYSQL_PASSWORD')}"
     f"@{os.getenv('MYSQL_HOST')}:{os.getenv('MYSQL_PORT')}"
     f"/{os.getenv('MYSQL_DATABASE')}"
+)
+
+engine = create_engine(
+    DATABASE_URL,
+    echo=True
 )
 # 1.定义表
 Base = declarative_base()
@@ -29,11 +35,6 @@ class Booking(Base):
     end_time=Column(DateTime)
     status = Column(String(20), nullable=False, default="pending")
 
-# 2.建立连接
-engine = create_engine(
-    DATABASE_URL,
-    echo=True
-)
 #3.创建表
 print("Tables to create:", Base.metadata.tables.keys())
 Base.metadata.create_all(engine)
