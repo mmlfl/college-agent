@@ -1,8 +1,8 @@
 from fastapi import APIRouter
 from sqlalchemy.orm import Session
-from entity.venueEntity import VenueEntity
+from sql.entity.venueEntity import VenueEntity
 
-from booking.models import Venue, engine
+from sql.table.models import Venue, engine
 
 router = APIRouter()
 

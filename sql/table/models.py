@@ -35,6 +35,14 @@ class Booking(Base):
     end_time=Column(DateTime)
     status = Column(String(20), nullable=False, default="pending")
 
+class Message(Base):
+    __tablename__ = "messages"
+    id = Column(Integer,primary_key=True,autoincrement=True)
+    student_id = Column(Integer)
+    question=Column(String,nullable=False)
+    answer=Column(String,nullable=False)
+    create_time=Column(DateTime)
+
 #3.创建表
 print("Tables to create:", Base.metadata.tables.keys())
 Base.metadata.create_all(engine)

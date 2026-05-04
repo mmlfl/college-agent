@@ -1,7 +1,7 @@
-from entity.bookingEntity import BookingEntity
+from sql.entity.bookingEntity import BookingEntity
 from fastapi import APIRouter
 from sqlalchemy.orm import Session
-from booking.models import engine, Booking
+from sql.table.models import engine, Booking
 
 router = APIRouter()
 

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 
@@ -11,8 +12,9 @@ from langgraph.graph import StateGraph, MessagesState
 from langgraph.prebuilt import ToolNode
 
 from rag.rag_chain import rag_search
-from sql.booking.bookingAPi import router as booking_router
-from sql.booking.venueApi import router as venue_router
+from sql.api.bookingAPi import router as booking_router
+from sql.api.venueApi import router as venue_router
+from sql.crud.message import save_to_db
 from sql.entity.studentForm import StudentForm
 from sql.tools.tool1 import *
 
@@ -170,7 +172,12 @@ async def chat(studentForm: StudentForm):
             ]},
             config=config,
         )
-        return response["messages"][-1].content
+        answer = response["messages"][-1].content
+        #异步写入Mysql数据库对话消息
+        asyncio.create_task(
+            save_to_db(studentForm.id,studentForm.content,answer)
+        )
+        return answer
     except Exception as e:
         # 记录日志,返回友好提示
         logger.error(f"Chat error: {e}")
