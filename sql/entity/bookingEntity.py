@@ -1,6 +1,7 @@
-from datetime import time, datetime
+from datetime import datetime
 
 from pydantic import BaseModel
+
 
 class BookingEntity(BaseModel):
     id:int | None=None
