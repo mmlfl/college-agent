@@ -4,12 +4,14 @@ import os
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.redis import RedisSaver
 from langgraph.graph import StateGraph, MessagesState
 from langgraph.prebuilt import ToolNode
+from langgraph.store.base import BaseStore
+from langgraph.store.redis import RedisStore
 
 from rag.rag_chain import rag_search
 from sql.api.bookingAPi import router as booking_router
@@ -93,71 +95,96 @@ tools = [
 # 模型必须绑定工具，才知道可以输出 tool_calls create_agent方法帮你绑定了工具而已 自定义图的时候就得自己绑定工具
 model_with_tools = model.bind_tools(tools)
 
-builder = StateGraph(MessagesState)
+class AgentState(MessagesState):
+    last_summarized_index: int = 0  # 默认0,表示还没有做记忆摘要
 
-def agent_node(state):
+def should_summarize(state):
+    msgs = state.get("messages", [])
+    last_idx = state.get("last_summarized_index", 0)
+    return (len(msgs) - last_idx) >= 20  # 新增20条就触发
+
+def summarize_and_store(state,config:RunnableConfig,*,store:BaseStore):
+    msgs = state.get("messages",[])
+    last_index = state.get("last_summarized_index",0)
+
+    to_summary = msgs[last_index:last_index+10]
+    summary = extractor_model.invoke([
+        SystemMessage("压缩以下对话为摘要:"),
+        HumanMessage(format_messages(to_summary)),  # 包成 HumanMessage
+    ]).content
+    store.put(
+        ("user",config["configurable"]["thread_id"]),
+        "summary",
+        {"content": summary},
+    )
+    return {
+        "last_summarized_index": last_index+len(to_summary),
+    }
+
+def agent_node(state,config:RunnableConfig,*,store:BaseStore):
     """调模型,返回响应"""
-    full_history = state['messages']
-    last_msg = full_history[-1]
-    user_question = last_msg.content if isinstance(last_msg, HumanMessage) else ""
+    msgs = state["messages"]
+    last_idx = state.get("last_summarized_index",0)
+    summary_item = store.get(("user", config["configurable"]["thread_id"]), "summary")
+    summary = summary_item.value["content"] if summary_item else None
+    # 截取未摘要的部分
+    unsummarized = msgs[last_idx:]
+    if summary:
+        context = [HumanMessage(summary)] + unsummarized
+    else:
+        context = unsummarized
 
-    relevant_memory = extract_relevant_memory(full_history, user_question)
-
-    context_messages = [
-        SystemMessage(f"以下是从历史中提取的相关记忆:\n{relevant_memory}"),
-        last_msg,  # 用户当前提问
-    ]
-    response = model_with_tools.invoke(context_messages)
+    response = model_with_tools.invoke(context)
     return {"messages": [response]}
 
 
-builder.add_node("agent", agent_node)
-builder.add_node("tools", ToolNode(tools))
-# 设置入口
-builder.set_entry_point("agent")
+def graph_build():
+    builder = StateGraph(AgentState)
+    builder.add_node("agent", agent_node)
+    builder.add_node("tools", ToolNode(tools))
+    builder.add_node("summarize",summarize_and_store)
+    # 设置入口
+    builder.set_entry_point("agent")
 
+    # 条件边
+    def should_use_tool(state) -> str:
+        """看最后一条消息有没有 tool_calls"""
+        last = state['messages'][-1]
+        if isinstance(last, AIMessage) and last.tool_calls:
+            return "tools"
+        return "__end__"
 
-# 条件边
-def should_use_tool(state) -> str:
-    """看最后一条消息有没有 tool_calls"""
-    last = state['messages'][-1]
-    if isinstance(last, AIMessage) and last.tool_calls:
-        return "tools"
-    return "__end__"
+    builder.add_conditional_edges(
+        "agent",
+        should_use_tool,
+        {"tools": "tools", "__end__": "__end__"},
+    )
+    builder.add_conditional_edges(
+        "tools",
+        should_summarize,
+        {True: "summarize", False: "agent"}
+    )
+    # 工具执行完后，固定回到 agent（让它基于工具结果继续推理）
+    builder.add_edge("summarize","agent")
+    # Redis 来做记忆持久化
+    # "redis://localhost:6379"
+    REDIS_URL = f"redis://{os.getenv('REDIS_HOST')}:{os.getenv('REDIS_PORT')}"
+    redis_checkpointer = RedisSaver(
+        redis_url=REDIS_URL,
+        ttl={
+            "default_ttl": 10080,  # 这个单位是分钟
+            "refresh_on_read": False,  # 读取不刷新
+        },
+    )
+    redis_store = RedisStore(
+        conn=redis_checkpointer._redis,
+    )
+    redis_store.setup()  # 初始化
+    redis_checkpointer.setup()  # 必须调! 初始化 _key_registry
+    graph = builder.compile(checkpointer=redis_checkpointer,store=redis_store)
+    return graph
 
-
-builder.add_conditional_edges(
-    "agent",
-    should_use_tool,
-    {"tools": "tools", "__end__": "__end__"},
-)
-# 工具执行完后，固定回到 agent（让它基于工具结果继续推理）
-builder.add_edge("tools", "agent")
-
-# Redis 来做记忆持久化
-# "redis://localhost:6379"
-REDIS_URL = f"redis://{os.getenv('REDIS_HOST')}:{os.getenv('REDIS_PORT')}"
-redis_checkpointer = RedisSaver(
-    redis_url=REDIS_URL,
-    ttl={
-        "default_ttl": 10080,  # 这个单位是分钟
-        "refresh_on_read": False,  # 读取不刷新
-    },
-)
-redis_checkpointer.setup()  # 必须调! 初始化 _key_registry
-graph = builder.compile(checkpointer=redis_checkpointer)
-
-agent = create_agent(
-    model=model,
-    tools=[
-        rag_search,
-        query_venues,
-        check_availability,
-        create_booking,
-        cancel_booking,
-    ],
-    checkpointer=redis_checkpointer,
-)
+graph = graph_build()
 @app.get("/")
 async def root():
     return {"message": "Hello World"}

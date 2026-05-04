@@ -1,7 +1,7 @@
 import os
 
 from dotenv import load_dotenv
-from sqlalchemy import Column, Integer, String, create_engine, DateTime
+from sqlalchemy import Column, Integer, String, create_engine, DateTime, Text
 from sqlalchemy.orm import declarative_base
 
 load_dotenv()
@@ -39,8 +39,8 @@ class Message(Base):
     __tablename__ = "messages"
     id = Column(Integer,primary_key=True,autoincrement=True)
     student_id = Column(Integer)
-    question=Column(String,nullable=False)
-    answer=Column(String,nullable=False)
+    question=Column(String(1000),nullable=False)
+    answer=Column(Text,nullable=False)
     create_time=Column(DateTime)
 
 #3.创建表

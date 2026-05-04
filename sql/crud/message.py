@@ -12,7 +12,7 @@ async def save_to_db(studentId:int,question:str,answer:str):
             student_id=studentId,
             question=question,
             answer=answer,
-            create_time=datetime.datetime.now(),
+            create_time=datetime.now(),
         )
         session.add(message)
         session.commit()
