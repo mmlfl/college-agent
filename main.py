@@ -1,8 +1,10 @@
 import asyncio
+import json
 import logging
 
 from fastapi import FastAPI
 from langchain_core.messages import HumanMessage
+from starlette.responses import StreamingResponse
 
 from graph import graph
 from sql.api.bookingAPi import router as booking_router
@@ -36,6 +38,35 @@ async def chat(studentForm: StudentForm):
             save_to_db(studentForm.id, studentForm.content, answer)
         )
         return answer
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return {"error": "服务暂时不可用,请稍后重试"}
+
+
+#TODO Stream_chat 功能目前尚待开发 我的graph是循环流 目前无法使用stream流来逐一打印最终输出
+@app.post("/stream/chat")
+async def streamChat(studentForm: StudentForm):
+    config = {"configurable": {"thread_id": str(studentForm.id)}}
+    try:
+        def generate():
+            # "messages" 模式: event 是 dict, data 字段才是 (message, metadata) 元组
+            # 使用 stream 而非 astream，因为 RedisSaver 只实现了同步版本
+            for event in graph.stream(
+                    {"messages": [HumanMessage(studentForm.content)]},
+                    config=config,
+                    stream_mode="messages",
+                    version="v2",
+            ):
+                # event = {'type': 'messages', 'ns': (), 'data': (msg, metadata)}
+                msg, metadata = event["data"]
+                # 只要 AI 回复的文本增量，不要工具调用
+                if isinstance(msg.content, str) and msg.content and not msg.tool_calls:
+                    yield f"data: {json.dumps({'content': msg.content})}\n\n"
+
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
+
     except Exception as e:
         logger.error(f"Chat error: {e}")
         return {"error": "服务暂时不可用,请稍后重试"}

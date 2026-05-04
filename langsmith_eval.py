@@ -15,7 +15,13 @@ judge = ChatOpenAI(
 
 
 def _extract_from_trace(outputs: dict) -> tuple:
-    """从 dataset 的 trace 链条中提取 question, context, answer"""
+    """倒序遍历 trace，找到当前轮次的 question/context/answer
+
+    记忆系统会导致 messages 列表堆积多轮数据，所以从后往前找：
+    - 倒过来第一条 AI → 当前轮 answer
+    - 倒过来第一条 rag_search → 当前轮 context
+    - 倒过来第一条 human → 当前轮 question
+    """
     if not outputs:
         return "", "", ""
 
@@ -25,20 +31,26 @@ def _extract_from_trace(outputs: dict) -> tuple:
     context = ""
     answer = ""
 
-    for msg in messages:
-        if isinstance(msg, dict):
-            msg_type = msg.get("type", msg.get("lc", ""))
-            if msg_type == "human" and not question:
-                content = msg.get("content", "")
-                question = content if isinstance(content, str) else str(content)
-            elif msg_type == "tool" and msg.get("name") == "rag_search":
-                content = msg.get("content", "")
-                context = content if isinstance(content, str) else str(content)
-            elif msg_type == "ai":
-                content = msg.get("content", "")
-                answer = content if isinstance(content, str) else str(content)
+    for msg in reversed(messages):
+        if not isinstance(msg, dict):
+            continue
+        msg_type = msg.get("type", msg.get("lc", ""))
 
-    print(f"question: {question}, context: {context}, answer: {answer}")
+        if not answer and msg_type == "ai":
+            content = msg.get("content", "")
+            answer = content if isinstance(content, str) else str(content)
+        elif not context and msg_type == "tool" and msg.get("name") == "rag_search":
+            content = msg.get("content", "")
+            context = content if isinstance(content, str) else str(content)
+        elif not question and msg_type == "human":
+            content = msg.get("content", "")
+            question = content if isinstance(content, str) else str(content)
+
+        # 三个都找到了就提前退出
+        if question and context and answer:
+            break
+
+    print(f"question: {question[:50]}..., context: {context[:50]}..., answer: {answer[:50]}...")
     return question, context, answer
 
 
