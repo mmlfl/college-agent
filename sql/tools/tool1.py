@@ -4,8 +4,8 @@ from sql.table.models import Booking, Venue, engine
 
 
 @tool
-def query_venues(question: str) -> str:
-    """查询所有场地信息。参数: 用户问题"""
+def query_venues(question: str = "") -> str:
+    """查询所有场地信息。参数: 用户问题(可选)"""
     with Session(engine) as session:
         venues = session.query(Venue).all()
         result = "\n".join(
@@ -16,20 +16,24 @@ def query_venues(question: str) -> str:
 
 
 @tool
-def check_availability(venue_id: int, date: str) -> str:
-    """查询某场地在某天的预约情况。参数: venue_id, date(YYYY-MM-DD)"""
+def check_availability(venue_name: str, date: str) -> str:
+    """查询某场地在某天的预约情况。参数: venue_name(场地名,支持模糊匹配), date(YYYY-MM-DD)"""
     with Session(engine) as session:
+        venue = session.query(Venue).filter(
+            Venue.name.like(f"%{venue_name}%")
+        ).first()
+        if not venue:
+            return f"未找到名为 '{venue_name}' 的场地"
+
         bookings = session.query(Booking).filter(
-            Booking.venue_id == venue_id,
+            Booking.venue_id == venue.id,
             Booking.start_time.like(f"{date}%"),
             Booking.status != "cancelled"
         ).all()
         if not bookings:
-            return f"场地 {venue_id} 在 {date} 全天空闲"
-        result = f"场地 {venue_id} 在 {date} 有以下预约:"
-        for b in bookings:
-            result += f"\n- {b.start_time} ~ {b.end_time} (状态: {b.status})"
-        return result
+            return f"场地 {venue.name}(ID:{venue.id}) 在 {date} 全天空闲|venue_id:{venue.id}"
+        occupied = "; ".join(f"{b.start_time}~{b.end_time}" for b in bookings)
+        return f"场地 {venue.name}(ID:{venue.id}) 在 {date} 有以下预约: {occupied}|venue_id:{venue.id}"
 
 
 @tool

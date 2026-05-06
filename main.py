@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage
 from starlette.responses import StreamingResponse
 
 from graph import graph
+from langgraph.types import Command
 from sql.api.bookingAPi import router as booking_router
 from sql.api.venueApi import router as venue_router
 from sql.crud.message import save_to_db
@@ -29,17 +30,36 @@ async def root():
 async def chat(studentForm: StudentForm):
     config = {"configurable": {"thread_id": str(studentForm.id)}}
     try:
-        response = graph.invoke(
-            {"messages": [HumanMessage(studentForm.content)]},
-            config=config,
-        )
-        answer = response["messages"][-1].content
-        asyncio.create_task(
-            save_to_db(studentForm.id, studentForm.content, answer)
-        )
-        return answer
+        if studentForm.resume is not None:
+            logger.info(f"Resuming with: {studentForm.resume}")
+            input_data = Command(resume=studentForm.resume)
+        else:
+            input_data = {"messages": [HumanMessage(studentForm.content)]}
+
+        answer = None
+        interrupt_data = None
+
+        for chunk in graph.stream(input_data, config=config, stream_mode="updates"):
+            if "__interrupt__" in chunk:
+                interrupt_info = chunk["__interrupt__"][0]
+                interrupt_data = interrupt_info.value
+                logger.info(f"Caught interrupt: {interrupt_data}")
+                break
+            for node_name, node_output in chunk.items():
+                if "messages" in node_output:
+                    for msg in node_output["messages"]:
+                        if hasattr(msg, "content") and msg.content and not getattr(msg, "tool_calls", None):
+                            answer = msg.content if isinstance(msg.content, str) else str(msg.content)
+
+        if interrupt_data is not None:
+            return {"interrupt": True, "data": interrupt_data}
+
+        if answer:
+            return answer
+        return {"error": "未获取到AI回复"}
+
     except Exception as e:
-        logger.error(f"Chat error: {e}")
+        logger.error(f"Chat error: {type(e).__name__}: {e}")
         return {"error": "服务暂时不可用,请稍后重试"}
 
 
