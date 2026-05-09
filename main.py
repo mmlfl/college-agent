@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 
@@ -6,13 +5,12 @@ from fastapi import FastAPI
 from langchain_core.messages import HumanMessage
 from starlette.responses import StreamingResponse
 
-from graph import graph, redis_checkpointer, redis_store
+from graph import graph,redis_checkpointer, redis_store
 from langgraph.types import Command
 
-from graph.ragGraph import rag_graph_builder
+from graph.rag.rag_graph import rag_agentic_graph_builder
 from sql.api.bookingAPi import router as booking_router
 from sql.api.venueApi import router as venue_router
-from sql.crud.message import save_to_db
 from sql.entity.studentForm import StudentForm
 
 logger = logging.getLogger(__name__)
@@ -76,10 +74,14 @@ async def chat(studentForm: StudentForm):
         logger.error(f"Chat error: {type(e).__name__}: {e}")
         return {"error": "服务暂时不可用,请稍后重试"}
 
+
 @app.post("/rag/chat")
 async def ragChat(studentForm: StudentForm):
-    config = {"configurable": {"thread_id": str(studentForm.id)}}
-
+    graph = rag_agentic_graph_builder()
+    response = graph.invoke({
+        "question": studentForm.content,
+    })
+    return response.get("answer", "未获取到回复")
 
 
 #TODO Stream_chat 功能目前尚待开发 我的graph是循环流 目前无法使用stream流来逐一打印最终输出

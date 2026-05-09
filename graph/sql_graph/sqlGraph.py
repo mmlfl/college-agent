@@ -5,7 +5,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, MessagesState
 from langgraph.prebuilt import ToolNode
 
-from graph.graphConfig import (
+from graph.main.graph_config import (
     AgentState, redis_store, sql_model, sql_tools,
     WRITE_TOOL_NAMES, review_node,
     get_last_idx_from_store, make_summarize_and_store,
@@ -19,9 +19,9 @@ def sql_graph_builder():
     def _build_sql_graph_node(store):
         def sql_agent_node(state, config: RunnableConfig, *, store):
             msgs = state["messages"]
-            last_idx = get_last_idx_from_store(state, config, "sql")
+            last_idx = get_last_idx_from_store(state, config, "sql_graph")
             summary_item = store.get(
-                ("user", config["configurable"]["thread_id"], "sql"), "summary"
+                ("user", config["configurable"]["thread_id"], "sql_graph"), "summary"
             )
             context = [SystemMessage(
                 "你是福建师范大学场馆预订助手。你有以下工具: query_venues, check_availability, create_booking, cancel_booking。\n"
@@ -75,7 +75,7 @@ def sql_graph_builder():
     builder.add_node("agent", _build_sql_graph_node(redis_store))
     builder.add_node("review", review_node)
     builder.add_node("tools", ToolNode(sql_tools))
-    builder.add_node("summarize", make_summarize_and_store("sql"))
+    builder.add_node("summarize", make_summarize_and_store("sql_graph"))
 
     builder.add_conditional_edges(
         "agent",

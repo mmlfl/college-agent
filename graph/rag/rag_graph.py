@@ -2,17 +2,24 @@ from typing import Literal
 
 from langchain_core.messages import SystemMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph import StateGraph, MessagesState
+from langgraph.graph import StateGraph, MessagesState, START, END
 from langgraph.prebuilt import ToolNode
 
-from graph.graphConfig import (
+from graph.main.graph_config import (
     AgentState, redis_store, rag_model, rag_tools,
     get_last_idx_from_store, make_summarize_and_store,
     logger,
 )
+from graph.rag.node.fallback import fallback
+from graph.rag.node.generate import generate_answer
+from graph.rag.node.grade_answer import grade_answer_from_context
+from graph.rag.node.grade_context import grade_context_from_retrieve
+from graph.rag.node.retrieve import retrieve_from_milvus
+from graph.rag.node.rewrite import query_rewrite
+from graph.rag.state.rag_agent_state import RagAgentState
 
 
-def rag_graph_builder():
+def rag_react_graph_builder():
     builder = StateGraph(AgentState)
 
     def _build_rag_graph_node(store):
@@ -65,4 +72,53 @@ def rag_graph_builder():
 
     return builder
 
+
+
+MAX_ITERATIONS = 3
+
+
+def route_after_grade_context(state: RagAgentState):
+    if state["context_grade"].score < 0.8:
+        if state.get("iterations", 0) >= MAX_ITERATIONS:
+            return "fallback"
+        return "rewrite"
+    return "generate"
+
+
+def route_after_grade_answer(state: RagAgentState):
+    if state["answer_grade"].score < 0.8:
+        if state.get("iterations", 0) >= MAX_ITERATIONS:
+            return "fallback"
+        return "rewrite"
+    return END
+
+
+def rag_agentic_graph_builder():
+    workflow = StateGraph(RagAgentState)
+
+    workflow.add_node("retrieve", retrieve_from_milvus)
+    workflow.add_node("grade_context", grade_context_from_retrieve)
+    workflow.add_node("generate", generate_answer)
+    workflow.add_node("grade_answer", grade_answer_from_context)
+    workflow.add_node("rewrite", query_rewrite)
+    workflow.add_node("fallback", fallback)
+
+    workflow.add_edge(START, "retrieve")
+    workflow.add_edge("retrieve", "grade_context")
+    workflow.add_edge("rewrite", "retrieve")
+    workflow.add_edge("generate", "grade_answer")
+
+    workflow.add_conditional_edges(
+        "grade_context",
+        route_after_grade_context,
+        {"rewrite": "rewrite", "generate": "generate", "fallback": "fallback"},
+    )
+
+    workflow.add_conditional_edges(
+        "grade_answer",
+        route_after_grade_answer,
+        {"rewrite": "rewrite", "fallback": "fallback", END: END},
+    )
+
+    return workflow.compile()
 

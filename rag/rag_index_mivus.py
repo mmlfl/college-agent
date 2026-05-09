@@ -180,8 +180,6 @@ def rewrite_query(query: str):
     variants = [line.strip() for line in response.content.strip().split("\n") if line.strip()]
     # 保留原始查询 + LLM 生成的变体
     return [query] + variants[:3]
-
-
 def fine_rowing_context(query: str, fused: List[List[dict]]) -> str:
     """对混合检索结果做精排,返回 top-k 最相关的上下文"""
     # 1.去重提取所有chunk数据
