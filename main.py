@@ -9,9 +9,9 @@ from graph import graph,redis_checkpointer, redis_store
 from langgraph.types import Command
 
 from graph.rag.rag_graph import rag_agentic_graph_builder
-from sql.api.bookingAPi import router as booking_router
-from sql.api.venueApi import router as venue_router
-from sql.entity.studentForm import StudentForm
+from graph.sql.sql_previous_work.api.bookingAPi import router as booking_router
+from graph.sql.sql_previous_work.api.venueApi import router as venue_router
+from graph.sql.sql_previous_work.entity.studentForm import StudentForm
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

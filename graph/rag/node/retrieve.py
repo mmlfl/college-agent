@@ -3,7 +3,7 @@ from pymilvus import AnnSearchRequest, RRFRanker
 
 from graph.rag.rag_config import fine_rowing_model, embedding_model
 from graph.rag.state.rag_agent_state import RagAgentState
-from rag.rag_index_mivus import client, COLLECTION_NAME
+from graph.rag.rag_previous_work.rag_index_mivus import client, COLLECTION_NAME
 
 MAX_CANDIDATES = 5
 MAX_FINAL = 5

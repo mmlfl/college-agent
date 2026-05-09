@@ -6,7 +6,7 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from pymilvus import MilvusClient, DataType, Function, FunctionType, AnnSearchRequest, RRFRanker
 from pymilvus.milvus_client.index import IndexParams
 
-from rag.rag_loadDocuments import get_chunks
+from graph.rag.rag_previous_work.rag_loadDocuments import get_chunks
 
 load_dotenv()
 # ================= 配置区 =================
@@ -14,7 +14,7 @@ URI = "http://192.168.56.10:19530"
 DB_NAME = "lfl_college"
 COLLECTION_NAME = "campus_details"
 RESET_MODE = False
-DIRECTORY_PATH = "D:/develop/code/python/langchain-ai-learning/college_rag_data"
+DIRECTORY_PATH = "/college_rag_data"
 
 # ================= 模型配置 =================
 APIKEY = os.getenv("DASHSCOPE_API_KEY")

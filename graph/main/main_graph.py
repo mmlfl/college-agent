@@ -9,7 +9,7 @@ from graph.main.graph_config import (
     extractor_model, format_messages, get_message_text,
     should_summarize, make_summarize_and_store,
 )
-from graph.sql_graph.sqlGraph import sql_graph_builder
+from graph.sql.sqlGraph import sql_graph_builder
 from graph.rag.rag_graph import rag_react_graph_builder
 
 logger = logging.getLogger(__name__)
@@ -35,11 +35,11 @@ def main_graph_builder():
             ),
         ]).content.strip().lower()
 
-        intent = result if result in ("sql_graph", "rag") else "rag"
+        intent = result if result in ("sql", "rag") else "rag"
         logger.info(f"[intent] classified as: {intent}")
         return {"_intent": intent}
 
-    builder.add_node("sql_graph", sql_g)
+    builder.add_node("sql", sql_g)
     builder.add_node("rag", rag_g)
     builder.add_node("intent", intent_router)
 
@@ -47,7 +47,7 @@ def main_graph_builder():
     builder.add_conditional_edges(
         "intent",
         lambda s: s.get("_intent", "rag"),
-        {"sql_graph": "sql_graph", "rag": "rag"},
+        {"sql": "sql", "rag": "rag"},
     )
     return builder
 

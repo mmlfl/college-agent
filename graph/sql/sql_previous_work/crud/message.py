@@ -2,7 +2,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from sql.table.models import engine, Message
+from graph.sql.sql_previous_work.table.models import engine, Message
 
 
 async def save_to_db(student_id: int, question: str, answer: str):

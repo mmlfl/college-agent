@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from langchain_core.tools import tool
-from sql.table.models import Booking, Venue, engine
+from graph.sql.sql_previous_work.table.models import Booking, Venue, engine
 
 
 @tool
