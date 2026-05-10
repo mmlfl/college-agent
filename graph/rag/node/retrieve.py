@@ -1,13 +1,19 @@
+import os
+
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
-from pymilvus import AnnSearchRequest, RRFRanker
+from pymilvus import AnnSearchRequest, RRFRanker, MilvusClient
 
 from graph.rag.rag_config import fine_rowing_model, embedding_model
 from graph.rag.state.rag_agent_state import RagAgentState
-from graph.rag.rag_previous_work.rag_index_mivus import client, COLLECTION_NAME
 
-MAX_CANDIDATES = 5
-MAX_FINAL = 5
-
+MAX_CANDIDATES = 10
+MAX_FINAL = 10
+TOP_K = 5
+load_dotenv()
+#MilvusClient配置
+client = MilvusClient(uri=os.getenv("MILVUS_URI"),db_name=os.getenv("MILVUS_DB"))
+COLLECTION_NAME = os.getenv("MILVUS_DB_COLLECTION_NAME")
 
 def retrieve_from_milvus(state: RagAgentState):
     queries = [state["question"]]
@@ -34,7 +40,7 @@ def retrieve_from_milvus(state: RagAgentState):
         reqs=[bm25_search, vector_search],
         ranker=RRFRanker(k=60),
         limit=MAX_FINAL,
-        output_fields=["text", "source"],
+        output_fields=["text", "source", "doc_type", "product_id", "product_name"],
     )
 
     ranked_context = fine_rowing_context(state["question"], fused)
@@ -43,13 +49,13 @@ def retrieve_from_milvus(state: RagAgentState):
     return {
         "context": ranked_context,
         "trace": [
-            f"retrieve: {len(queries)}个查询混合检索 -> 命中{total_hits}条 -> 精排top-3"
+            f"retrieve: {len(queries)}个查询混合检索 -> 命中{total_hits}条 -> 精排top-{TOP_K}"
         ],
     }
 
 
 def fine_rowing_context(query: str, fused: list[list[dict]]) -> list[dict]:
-    """对混合检索结果做精排,返回 top-3 chunks (含score/text/source)"""
+    """对混合检索结果做精排,返回 top-K chunks (含score/text/source/doc_type/product_id/product_name)"""
 
     class RerankScores(BaseModel):
         scores: list[float] = Field(description="每个文档片段的相关性分数(0.0-1.0),顺序与输入一致")
@@ -60,17 +66,23 @@ def fine_rowing_context(query: str, fused: list[list[dict]]) -> list[dict]:
     chunks = []
     for hits in fused:
         for hit in hits:
-            text = hit['entity']['text']
-            source = hit['entity']['source']
+            entity = hit["entity"]
+            text = entity["text"]
             if text not in seen:
                 seen.add(text)
-                chunks.append({"text": text, "source": source})
+                chunks.append({
+                    "text": text,
+                    "source": entity.get("source", ""),
+                    "doc_type": entity.get("doc_type", ""),
+                    "product_id": entity.get("product_id", 0),
+                    "product_name": entity.get("product_name", ""),
+                })
 
     if not chunks:
         return []
 
     prompt = f"""用户问题: {query}
-     以下是检索到的文档片段,请判断每个片段与用户问题的相关程度。
+     以下是检索到的商品信息/评价片段,请判断每个片段与用户问题的相关程度。
      返回每个文档的分数(0.0-1.0,越高越相关):
      {chunks}"""
 
@@ -82,9 +94,16 @@ def fine_rowing_context(query: str, fused: list[list[dict]]) -> list[dict]:
         scores = [1.0 - i * 0.1 for i in range(len(chunks))]
 
     scored_chunks = [
-        {"score": scores[i], "text": chunks[i]["text"], "source": chunks[i]["source"]}
+        {
+            "score": scores[i],
+            "text": chunks[i]["text"],
+            "source": chunks[i]["source"],
+            "doc_type": chunks[i]["doc_type"],
+            "product_id": chunks[i]["product_id"],
+            "product_name": chunks[i]["product_name"],
+        }
         for i in range(min(len(scores), len(chunks)))
     ]
     scored_chunks.sort(key=lambda x: x["score"], reverse=True)
 
-    return scored_chunks[:3]
+    return scored_chunks[:TOP_K]

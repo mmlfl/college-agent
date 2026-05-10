@@ -18,15 +18,15 @@ def grade_context_from_retrieve(state: RagAgentState):
     contexts = state.get("context", [])
     context_text = "\n---\n".join(c["text"] for c in contexts)
 
-    prompt = f"""你是检查官,评估检索到的上下文与用户问题的相关性。
+    prompt = f"""你是检查官,评估检索到的商品信息/评价与用户购买咨询的相关性。
 
 用户问题:
 {question}
 
-检索到的上下文:
+检索到的商品信息:
 {context_text}
 
-请评估上下文与问题的相关性。"""
+请评估商品信息/评价与用户购买意图的相关性。"""
 
     result: GradeContextResult = _grader.invoke(prompt)
 

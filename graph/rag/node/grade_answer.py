@@ -17,18 +17,18 @@ def grade_answer_from_context(state: RagAgentState):
     contexts = state.get("context", [])
     context_text = "\n---\n".join(c["text"] for c in contexts) if contexts else "（无上下文）"
 
-    prompt = f"""你是检查助手,检查回答的答案是否忠诚于上下文。
+    prompt = f"""你是检查助手,检查导购回答是否忠实于商品信息。
 
 用户问题:
 {state['question']}
 
-检索到的上下文:
+检索到的商品信息:
 {context_text}
 
 生成的答案:
 {state.get('answer', '')}
 
-请评估答案是否忠实于上下文,不要编造信息。"""
+请评估导购答案是否忠实于商品信息,不要编造价格、参数等信息。"""
 
     result: GradeAnswerResult = _grader.invoke(prompt)
 

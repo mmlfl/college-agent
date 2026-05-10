@@ -17,18 +17,18 @@ def query_rewrite(state: RagAgentState):
 
     previous_text = "\n".join(f"- {q}" for q in previous) if previous else "（无历史查询）"
 
-    prompt = f"""你是查询重写专家。用户问题检索效果不佳,需要改写成更适合向量检索的形式。
+    prompt = f"""你是电商搜索查询优化专家。用户的商品搜索效果不佳,需要改写成更适合商品库检索的形式。
 
             用户原始问题:
             {question}
-            
+
             之前尝试过的查询:
             {previous_text}
-            
+
             请生成2-3个新的查询变体,要求:
-            - 从不同角度表达同一意图(同义词替换、具体化、拆解等)
+            - 从不同角度表达同一购买意图(同义词替换、具体化品牌/型号、拆解需求等)
             - 不要重复之前已经尝试过的查询
-            - 适合用于向量数据库检索"""
+            - 适合用于商品库向量检索,包含明确的商品关键词"""
 
     result: RewrittenQuestions = _rewriter.invoke(prompt)
 
